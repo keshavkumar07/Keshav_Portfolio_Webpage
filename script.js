@@ -90,32 +90,60 @@ const statObserver = new IntersectionObserver((entries) => {
 statNums.forEach(el => statObserver.observe(el));
 
 // =========================================================
-// Active nav link on scroll
+// Active nav link on scroll (position-based scrollspy)
+//
+// NOTE: an IntersectionObserver with a fixed `threshold` (e.g. 0.4)
+// requires that fraction of the *entire section* to be on screen
+// before it counts as active. Sections like About, Journey,
+// Projects, Philosophy and Skills are all taller than the viewport,
+// so that threshold can never be reached and the underline gets
+// stuck on whichever short section (Hero/Contact) last qualified.
+// A scroll-position comparison works correctly no matter how tall
+// each section is.
 // =========================================================
-const sections = document.querySelectorAll('main section[id]');
-const navLinks = document.querySelectorAll('.nav-links a');
-
-const navObserver = new IntersectionObserver((entries) => {
-  entries.forEach(entry => {
-    const id = entry.target.getAttribute('id');
-    const link = document.querySelector(`.nav-links a[href="#${id}"]`);
-    if (!link) return;
-    if (entry.isIntersecting) {
-      navLinks.forEach(l => l.classList.remove('active'));
-      link.classList.add('active');
-    }
-  });
-}, { threshold: 0.4, rootMargin: '-80px 0px -40% 0px' });
-
-sections.forEach(section => navObserver.observe(section));
-
-// =========================================================
-// Sticky nav shadow + scroll progress bar
-// =========================================================
+const sections = Array.from(document.querySelectorAll('main section[id]'));
+const navLinks = document.querySelectorAll('.nav-links a, .mobile-nav a');
 const nav = document.querySelector('.site-nav');
 const progressBar = document.getElementById('scrollProgress');
 
-window.addEventListener('scroll', () => {
+function setActiveLink(id) {
+  navLinks.forEach(link => {
+    link.classList.toggle('active', link.getAttribute('href') === `#${id}`);
+  });
+}
+
+function updateActiveSection() {
+  if (!sections.length) return;
+
+  const navHeight = nav ? nav.offsetHeight : 0;
+  const probeLine = window.scrollY + navHeight + 48; // just below the sticky nav
+
+  // Near the very bottom of the page, force the last section active —
+  // short trailing sections (like Contact) can otherwise be skipped.
+  const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+  if (atBottom) {
+    setActiveLink(sections[sections.length - 1].id);
+    return;
+  }
+
+  let current = sections[0];
+  for (const section of sections) {
+    if (section.offsetTop <= probeLine) {
+      current = section;
+    } else {
+      break;
+    }
+  }
+  setActiveLink(current.id);
+}
+
+// =========================================================
+// Sticky nav shadow + scroll progress bar + active link,
+// batched into a single rAF-throttled scroll handler.
+// =========================================================
+let scrollTicking = false;
+
+function onScrollFrame() {
   if (window.scrollY > 8) {
     nav.style.boxShadow = '0 1px 0 rgba(22,24,29,0.05)';
   } else {
@@ -123,9 +151,31 @@ window.addEventListener('scroll', () => {
   }
 
   if (progressBar) {
-    const scrollTop = window.scrollY;
     const docHeight = document.documentElement.scrollHeight - window.innerHeight;
-    const pct = docHeight > 0 ? (scrollTop / docHeight) * 100 : 0;
+    const pct = docHeight > 0 ? (window.scrollY / docHeight) * 100 : 0;
     progressBar.style.width = pct + '%';
   }
+
+  updateActiveSection();
+  scrollTicking = false;
+}
+
+window.addEventListener('scroll', () => {
+  if (!scrollTicking) {
+    requestAnimationFrame(onScrollFrame);
+    scrollTicking = true;
+  }
 }, { passive: true });
+
+window.addEventListener('resize', () => {
+  if (!scrollTicking) {
+    requestAnimationFrame(onScrollFrame);
+    scrollTicking = true;
+  }
+}, { passive: true });
+
+// Run once on load so the correct link is active immediately,
+// and again after fonts/images settle (offsetTop can shift once
+// web fonts finish loading and reflow the page).
+onScrollFrame();
+window.addEventListener('load', onScrollFrame);
